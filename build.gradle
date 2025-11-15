@@ -1,4 +1,101 @@
 plugins {
-    // Required for NeoGradle
-    id "org.jetbrains.gradle.plugin.idea-ext" version "1.1.7"
+    id 'fabric-loom' version '1.13-SNAPSHOT'
+    id 'maven-publish'
+    id 'net.darkhax.curseforgegradle' version '1.+'
+    id "com.modrinth.minotaur" version "2.+"
+}
+
+import com.modrinth.minotaur.dependencies.ModDependency
+import groovy.json.JsonSlurper
+import groovy.json.JsonOutput
+
+sourceCompatibility = JavaVersion.VERSION_21
+targetCompatibility = JavaVersion.VERSION_21
+
+base {
+    archivesName = project.modName
+}
+version = project.modVersion
+group = project.mavenGroup
+
+repositories {
+
+}
+
+dependencies {
+	minecraft "com.mojang:minecraft:${project.minecraftVersion}"
+	mappings loom.officialMojangMappings()
+	modImplementation "net.fabricmc:fabric-loader:${project.loaderVersion}"
+	modImplementation "net.fabricmc.fabric-api:fabric-api:${project.fabricVersion}"
+}
+
+processResources {
+    inputs.property "version", project.modVersion
+
+	filesMatching("fabric.mod.json") {
+		expand "version": project.modVersion
+	}
+}
+
+processResources {
+	doLast {
+        def jsonMinifyStart = System.currentTimeMillis()
+        def jsonMinified = 0
+        def jsonBytesSaved = 0
+        fileTree(dir: outputs.files.asPath, include: '**/*.json').each {
+            File file = it
+            jsonMinified++
+            def oldLength = file.length()
+            file.text = JsonOutput.toJson(new JsonSlurper().parse(file))
+            jsonBytesSaved += oldLength - file.length()
+        }
+        println('Minified ' + jsonMinified + ' json files. Saved ' + jsonBytesSaved + ' bytes. Took ' + (System.currentTimeMillis() - jsonMinifyStart) + 'ms.')
+    }
+}
+
+tasks.withType(JavaCompile).configureEach {
+    it.options.release = 21
+}
+
+jar {
+	from("LICENSE") {
+		rename { "${it}_${project.modName}"}
+	}
+}
+
+if (file('key.properties').exists()) {
+    task publishCurseForge(type: net.darkhax.curseforgegradle.TaskPublishCurseForge) {
+        def curseProp = new Properties()
+        File secretPropsFile = file("key.properties")
+        curseProp.load(secretPropsFile.newInputStream())
+        apiToken = curseProp.getProperty("curseKey")
+
+        def mainFile = upload("543575", remapJar)
+        mainFile.releaseType = "release"
+        mainFile.changelogType = "text"
+        mainFile.addRequirement "fabric-api"
+        mainFile.changelog = file("CHANGELOG.txt")
+        mainFile.addModLoader("Fabric", "Quilt")
+        mainFile.addJavaVersion("Java 21")
+        mainFile.addGameVersion("1.21.10")
+    }
+}
+
+if (file('key.properties').exists()) {
+	modrinth {
+		def modrinthProp = new Properties()
+		File secretPropsFile = file("key.properties")
+		modrinthProp.load(secretPropsFile.newInputStream())
+
+		token = modrinthProp.getProperty('modrinthKey')
+		projectId = project.modrinthID
+		versionNumber = project.modVersion
+		uploadFile = remapJar
+		changelog = rootProject.file("changelog.txt").text
+		gameVersions = ['1.21.10']
+		loaders = ['fabric']
+		dependencies {
+        	required.project "fabric-api"
+   		}
+	}
 }
